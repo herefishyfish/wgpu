@@ -30,9 +30,10 @@ fn device_class_responds_to(device: &ProtocolObject<dyn MTLDevice>, sel: Sel) ->
 }
 
 /// Whether the render ICB probe may run on this device. Apple's paravirtual
-/// device aborts the process instead of failing the probe, and on Macs with
-/// Tier 1 argument buffers compiling the probe's ICB argument buffer aborts the
-/// shader compiler.
+/// device and the Simulator's device abort the process instead of failing the
+/// probe (the Simulator does not support indirect command buffers), and on Macs
+/// with Tier 1 argument buffers compiling the probe's ICB argument buffer aborts
+/// the shader compiler.
 fn render_icb_probe_allowed(
     is_virtual: bool,
     os_type: super::OsType,
@@ -40,7 +41,7 @@ fn render_icb_probe_allowed(
 ) -> bool {
     let tier1_mac =
         os_type == super::OsType::Macos && argument_buffers == Some(MTLArgumentBuffersTier::Tier1);
-    !is_virtual && !tier1_mac
+    !is_virtual && !tier1_mac && !cfg!(target_abi = "sim")
 }
 
 /// Maximum number of command buffers for `MTLCommandQueue`s that we create.
