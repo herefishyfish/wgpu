@@ -3705,7 +3705,7 @@ impl Device {
                     .planes
                     .get(i)
                     .unwrap_or(&external_texture.planes[0]);
-                let internal_use = wgt::TextureUses::RESOURCE;
+                let internal_use = wgt::TextureUses::RESOURCE | vertex_sampled(decl.visibility);
                 used.views.insert_single(plane.clone(), internal_use);
                 let view = plane.try_raw(snatch_guard)?;
                 Ok(hal::TextureBinding {
@@ -4233,7 +4233,9 @@ impl Device {
                 } else {
                     wgt::TextureUses::empty()
                 };
-                Ok(wgt::TextureUses::RESOURCE | depth_stencil_uses)
+                Ok(wgt::TextureUses::RESOURCE
+                    | depth_stencil_uses
+                    | vertex_sampled(decl.visibility))
             }
             wgt::BindingType::StorageTexture {
                 access,
@@ -4322,7 +4324,7 @@ impl Device {
                 }
 
                 view.check_usage(wgt::TextureUsages::TEXTURE_BINDING)?;
-                Ok(wgt::TextureUses::RESOURCE)
+                Ok(wgt::TextureUses::RESOURCE | vertex_sampled(decl.visibility))
             }
             _ => Err(Error::WrongBindingType {
                 binding,
@@ -5778,3 +5780,14 @@ impl Device {
 crate::impl_resource_type!(Device);
 crate::impl_labeled!(Device);
 crate::impl_storage_item!(Device);
+
+/// Marks a sampled texture that a vertex-stage shader can read, so barriers wait on that stage.
+fn vertex_sampled(visibility: wgt::ShaderStages) -> wgt::TextureUses {
+    if visibility
+        .intersects(wgt::ShaderStages::VERTEX | wgt::ShaderStages::TASK | wgt::ShaderStages::MESH)
+    {
+        wgt::TextureUses::VERTEX_SAMPLED
+    } else {
+        wgt::TextureUses::empty()
+    }
+}

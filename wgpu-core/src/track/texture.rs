@@ -41,18 +41,19 @@ use alloc::{
 use core::iter;
 
 /// Returns true if the transition from `old` to `new` does not require a barrier,
-/// ignoring which read-only aspect was sampled (`DEPTH_SAMPLED`/`STENCIL_SAMPLED`).
+/// ignoring which read-only aspect was sampled (`DEPTH_SAMPLED`/`STENCIL_SAMPLED`)
+/// and reads that stop reaching the vertex stage (`VERTEX_SAMPLED`). Reads that start
+/// reaching it still need one: the barrier into the current state may have left that stage out.
 fn skip_barrier_ignore_texture_flags(
     old: TextureUses,
     ordered_uses_mask: TextureUses,
     new: TextureUses,
 ) -> bool {
-    let aspect_sampled = TextureUses::DEPTH_SAMPLED | TextureUses::STENCIL_SAMPLED;
-    skip_barrier(
-        old - aspect_sampled,
-        ordered_uses_mask,
-        new - aspect_sampled,
-    )
+    let mut ignored = TextureUses::DEPTH_SAMPLED | TextureUses::STENCIL_SAMPLED;
+    if old.contains(TextureUses::VERTEX_SAMPLED) {
+        ignored |= TextureUses::VERTEX_SAMPLED;
+    }
+    skip_barrier(old - ignored, ordered_uses_mask, new - ignored)
 }
 
 impl ResourceUses for TextureUses {
@@ -69,6 +70,7 @@ impl ResourceUses for TextureUses {
     }
 
     fn is_invalid(self) -> bool {
+        let this = self - Self::VERTEX_SAMPLED;
         let valid_ds = [
             Self::DEPTH_WRITE | Self::STENCIL_WRITE,
             Self::DEPTH_WRITE | Self::STENCIL_READ,
@@ -78,10 +80,10 @@ impl ResourceUses for TextureUses {
             Self::DEPTH_WRITE | Self::RESOURCE | Self::STENCIL_READ | Self::STENCIL_SAMPLED,
             Self::STENCIL_WRITE | Self::RESOURCE | Self::DEPTH_READ | Self::DEPTH_SAMPLED,
         ];
-        (self.any_exclusive() && self.bits().count_ones() != 1)
-            || (self.intersects(Self::DEPTH_WRITE | Self::STENCIL_WRITE)
-                && self.bits().count_ones() != 1
-                && !valid_ds.contains(&self))
+        (this.any_exclusive() && this.bits().count_ones() != 1)
+            || (this.intersects(Self::DEPTH_WRITE | Self::STENCIL_WRITE)
+                && this.bits().count_ones() != 1
+                && !valid_ds.contains(&this))
     }
 }
 
@@ -1588,5 +1590,36 @@ unsafe fn update(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vertex_sampled_needs_a_barrier_only_when_it_starts() {
+        let ordered = TextureUses::RESOURCE;
+        let fragment = TextureUses::RESOURCE;
+        let vertex = TextureUses::RESOURCE | TextureUses::VERTEX_SAMPLED;
+        assert!(skip_barrier_ignore_texture_flags(vertex, ordered, fragment));
+        assert!(skip_barrier_ignore_texture_flags(vertex, ordered, vertex));
+        assert!(!skip_barrier_ignore_texture_flags(
+            fragment, ordered, vertex
+        ));
+    }
+
+    #[test]
+    fn vertex_sampled_keeps_read_only_depth_states_valid() {
+        let state = TextureUses::DEPTH_WRITE
+            | TextureUses::RESOURCE
+            | TextureUses::STENCIL_READ
+            | TextureUses::STENCIL_SAMPLED
+            | TextureUses::VERTEX_SAMPLED;
+        assert!(!state.is_invalid());
+        assert!(
+            (TextureUses::COLOR_TARGET | TextureUses::RESOURCE | TextureUses::VERTEX_SAMPLED)
+                .is_invalid()
+        );
     }
 }
