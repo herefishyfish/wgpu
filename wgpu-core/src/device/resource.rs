@@ -3885,6 +3885,7 @@ impl Device {
         let mut hal_textures = SmallVec::<[_; 8]>::new();
         let mut hal_tlas_s = SmallVec::<[_; 1]>::new();
         let mut hal_external_textures = SmallVec::<[_; 1]>::new();
+        let mut vertex_views = Vec::new();
         for entry in desc.entries.iter() {
             let binding = entry.binding;
             // Find the corresponding declaration in the layout
@@ -3892,6 +3893,24 @@ impl Device {
                 .entries
                 .get(binding)
                 .ok_or(Error::MissingBindingDeclaration(binding))?;
+            if decl
+                .visibility
+                .intersects(super::stage_compiler::VERTEX_STAGES)
+                && matches!(
+                    decl.ty,
+                    wgt::BindingType::Texture { .. } | wgt::BindingType::ExternalTexture
+                )
+            {
+                match entry.resource {
+                    Br::TextureView(ref view) => vertex_views.push((binding, view.clone())),
+                    Br::TextureViewArray(ref views) => {
+                        vertex_views.extend(views.iter().map(|view| (binding, view.clone())))
+                    }
+                    Br::ExternalTexture(ref texture) => vertex_views
+                        .extend(texture.planes.iter().map(|view| (binding, view.clone()))),
+                    _ => {}
+                }
+            }
             let (res_index, count) = match entry.resource {
                 Br::Buffer(ref bb) => {
                     let bb = self.create_buffer_binding(
@@ -4097,6 +4116,7 @@ impl Device {
             texture_init_actions,
             dynamic_binding_info,
             late_buffer_binding_infos,
+            vertex_views,
         };
 
         let bind_group = Arc::new(bind_group);
@@ -5201,8 +5221,17 @@ impl Device {
             resources,
             io,
             validated: validated_stages,
+            vertex_textures,
             ..
         } = compiler;
+        let vertex_stages = match (vertex_stage.is_some(), task_stage.is_some()) {
+            (true, _) => wgt::ShaderStages::VERTEX,
+            (false, true) => wgt::ShaderStages::TASK | wgt::ShaderStages::MESH,
+            (false, false) => wgt::ShaderStages::MESH,
+        };
+        let vertex_textures = validated_stages
+            .contains(vertex_stages)
+            .then_some(vertex_textures);
 
         let mut active_color_outputs = 0u64;
         if validated_stages.contains(wgt::ShaderStages::FRAGMENT) {
@@ -5419,6 +5448,7 @@ impl Device {
             tracking_data: TrackingData::new(self.tracker_indices.render_pipelines.clone()),
             is_mesh,
             has_task_shader,
+            vertex_textures,
         };
 
         let pipeline = Arc::new(pipeline);

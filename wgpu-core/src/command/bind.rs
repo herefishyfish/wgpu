@@ -4,8 +4,9 @@ use thiserror::Error;
 
 use crate::{
     binding_model::{BindGroup, LateMinBufferBindingSizeMismatch, PipelineLayout},
-    pipeline::LateSizedBufferGroup,
+    pipeline::{LateSizedBufferGroup, RenderPipeline},
     resource::{Labeled, ParentDevice, ResourceErrorIdent},
+    track::{ResourceUsageCompatibilityError, TextureUsageScope},
 };
 
 mod compat {
@@ -448,6 +449,49 @@ impl Binder {
                     payloads[index].dynamic_offsets.as_slice(),
                 )
             })
+    }
+
+    /// Flags the textures `pipeline`'s vertex, task or mesh shader samples from the bound groups
+    /// with `TextureUses::VERTEX_SAMPLED`, so barriers wait on those stages for them alone.
+    ///
+    /// # Safety
+    ///
+    /// As [`TextureUsageScope::merge_single`].
+    pub(super) unsafe fn flag_vertex_textures(
+        &self,
+        pipeline: &RenderPipeline,
+        textures: &mut TextureUsageScope,
+    ) -> Result<(), ResourceUsageCompatibilityError> {
+        if pipeline
+            .vertex_textures
+            .as_ref()
+            .is_some_and(|reads| reads.is_empty())
+        {
+            return Ok(());
+        }
+        for (index, payload) in self.payloads.iter().enumerate() {
+            let Some(group) = payload.group.as_ref() else {
+                continue;
+            };
+            for (binding, view) in group.vertex_views.iter() {
+                let read = match pipeline.vertex_textures {
+                    Some(ref reads) => reads
+                        .iter()
+                        .any(|read| read.group as usize == index && read.binding == *binding),
+                    None => true,
+                };
+                if read {
+                    unsafe {
+                        textures.merge_single(
+                            &view.parent,
+                            Some(view.selector.clone()),
+                            wgt::TextureUses::RESOURCE | wgt::TextureUses::VERTEX_SAMPLED,
+                        )?
+                    };
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn last_assigned_index(&self) -> Option<usize> {

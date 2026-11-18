@@ -1237,6 +1237,10 @@ pub struct RenderPipeline {
     /// Whether this is a mesh shader pipeline
     pub(crate) is_mesh: bool,
     pub(crate) has_task_shader: bool,
+    /// The textures this pipeline's vertex, task or mesh shader samples, by group and binding.
+    /// `None` when a stage is a passthrough shader, which isn't reflected: then every texture
+    /// bound visible to those stages counts.
+    pub(crate) vertex_textures: Option<Vec<naga::ResourceBinding>>,
 }
 
 impl Drop for RenderPipeline {
@@ -1317,6 +1321,7 @@ impl RenderPipeline {
             label,
             is_mesh: false,
             has_task_shader: false,
+            vertex_textures: Some(Vec::new()),
         })
     }
 

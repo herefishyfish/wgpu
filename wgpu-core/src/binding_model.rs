@@ -1786,6 +1786,9 @@ pub struct BindGroup {
     /// Actual binding sizes for buffers that don't have `min_binding_size`
     /// specified in BGL. Listed in the order of iteration of `BGL.entries`.
     pub(crate) late_buffer_binding_infos: Vec<BindGroupLateBufferBindingInfo>,
+    /// Sampled texture views visible to a vertex, task or mesh shader, with their binding.
+    /// A draw flags the ones its pipeline reads with `TextureUses::VERTEX_SAMPLED`.
+    pub(crate) vertex_views: Vec<(u32, Arc<TextureView>)>,
 }
 
 impl Drop for BindGroup {
@@ -1855,6 +1858,7 @@ impl BindGroup {
             texture_init_actions: Vec::new(),
             dynamic_binding_info: Vec::new(),
             late_buffer_binding_infos: Vec::new(),
+            vertex_views: Vec::new(),
             device,
         })
     }

@@ -1177,7 +1177,7 @@ fn draw(
 
     if instance_count > 0 && vertex_count > 0 {
         state.flush_vertex_buffers();
-        state.flush_bindings();
+        state.flush_bindings()?;
         state.flush_immediates();
         state.commands.push(ArcRenderCommand::Draw {
             vertex_count,
@@ -1218,7 +1218,7 @@ fn draw_indexed(
     if instance_count > 0 && index_count > 0 {
         state.flush_index();
         state.flush_vertex_buffers();
-        state.flush_bindings();
+        state.flush_bindings()?;
         state.flush_immediates();
         state.commands.push(ArcRenderCommand::DrawIndexed {
             index_count,
@@ -1265,7 +1265,7 @@ fn draw_mesh_tasks(
     .map_err(|err| RenderBundleErrorInner::Draw(err.into()))?;
 
     if total_count > 0 {
-        state.flush_bindings();
+        state.flush_bindings()?;
         state.flush_immediates();
         state.commands.push(ArcRenderCommand::DrawMeshTasks {
             group_count_x,
@@ -1340,7 +1340,7 @@ fn multi_draw_indirect(
     state.trackers.buffers.merge_single(&buffer, buffer_uses)?;
 
     state.flush_vertex_buffers();
-    state.flush_bindings();
+    state.flush_bindings()?;
     state.flush_immediates();
     state.commands.push(ArcRenderCommand::DrawIndirect {
         buffer,
@@ -1939,7 +1939,13 @@ impl State {
     /// Generate `SetBindGroup` commands for any bind groups that need to be updated.
     ///
     /// This should be further deduplicated with similar code on render/compute passes.
-    fn flush_bindings(&mut self) {
+    fn flush_bindings(&mut self) -> Result<(), RenderBundleErrorInner> {
+        if let Some(pipeline) = self.pipeline.as_ref() {
+            unsafe {
+                self.binder
+                    .flag_vertex_textures(pipeline, &mut self.trackers.textures)?
+            };
+        }
         let start = self.binder.take_rebind_start_index();
         let entries = self.binder.list_valid_with_start(start);
 
@@ -1958,6 +1964,7 @@ impl State {
                     num_dynamic_offsets: dynamic_offsets.len(),
                 }
             }));
+        Ok(())
     }
 }
 

@@ -1315,6 +1315,27 @@ pub struct StageIo {
 }
 
 impl Interface {
+    /// The group and binding of each texture `entry_point_name` samples at `stage`.
+    pub fn sampled_textures<'a>(
+        &'a self,
+        entry_point_name: &'a str,
+        stage: naga::ShaderStage,
+    ) -> impl Iterator<Item = naga::ResourceBinding> + 'a {
+        self.entry_points
+            .get(&EntryPointKeyRef(stage, entry_point_name))
+            .into_iter()
+            .flat_map(|entry_point| entry_point.resources.iter())
+            .map(|&handle| &self.resources[handle])
+            .filter(|res| {
+                matches!(
+                    res.ty,
+                    ResourceType::Texture { class, .. }
+                        if !matches!(class, naga::ImageClass::Storage { .. })
+                )
+            })
+            .map(|res| res.bind)
+    }
+
     /// Build some entry point's list of inputs or outputs.
     ///
     /// Given `ty` and `binding` that describe an entry point's argument or
@@ -2429,5 +2450,43 @@ impl ShaderStageForValidation {
             Self::AnyHit { .. } => wgt::ShaderStages::ANY_HIT,
             Self::ClosestHit { .. } => wgt::ShaderStages::CLOSEST_HIT,
         }
+    }
+}
+
+#[cfg(all(test, feature = "wgsl"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sampled_textures_lists_the_textures_a_stage_samples() {
+        let source = "
+            @group(0) @binding(0) var vertex_only: texture_2d<f32>;
+            @group(0) @binding(1) var fragment_only: texture_2d<f32>;
+            @group(1) @binding(0) var written: texture_storage_2d<rgba8unorm, write>;
+            @vertex fn vs() -> @builtin(position) vec4f {
+                return textureLoad(vertex_only, vec2i(0), 0);
+            }
+            @fragment fn fs() -> @location(0) vec4f {
+                textureStore(written, vec2i(0), vec4f(0.0));
+                return textureLoad(fragment_only, vec2i(0), 0);
+            }
+        ";
+        let module = naga::front::wgsl::parse_str(source).unwrap();
+        let info = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap();
+        let interface = Interface::new(&module, &info, wgt::Limits::default());
+        let bindings = |entry_point, stage| {
+            interface
+                .sampled_textures(entry_point, stage)
+                .map(|bind| (bind.group, bind.binding))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(bindings("vs", naga::ShaderStage::Vertex), [(0, 0)]);
+        assert_eq!(bindings("fs", naga::ShaderStage::Fragment), [(0, 1)]);
+        assert_eq!(bindings("vs", naga::ShaderStage::Fragment), []);
     }
 }

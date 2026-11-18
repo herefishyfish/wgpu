@@ -270,6 +270,9 @@ bitflags::bitflags! {
         const DEPTH_SAMPLED = 1 << 17;
         /// Flag used by texture tracker to say the read-only stencil aspect of texture is sampled.
         const STENCIL_SAMPLED = 1 << 18;
+        /// Flag used by texture tracker to say a vertex, task or mesh shader samples the texture.
+        /// Without it, [`Self::RESOURCE`] is only read by fragment and compute shaders.
+        const VERTEX_SAMPLED = 1 << 19;
     }
 }
 

@@ -238,6 +238,7 @@ impl crate::ColorAttachment<'_, super::TextureView> {
 }
 
 pub fn derive_image_layout(usage: wgt::TextureUses, format: wgt::TextureFormat) -> vk::ImageLayout {
+    let usage = usage - wgt::TextureUses::VERTEX_SAMPLED;
     let is_color = !format.is_depth_stencil_format();
     match usage {
         wgt::TextureUses::UNINITIALIZED => vk::ImageLayout::UNDEFINED,
@@ -339,7 +340,12 @@ pub fn map_texture_usage_to_barrier(
         access |= vk::AccessFlags::TRANSFER_WRITE;
     }
     if usage.contains(wgt::TextureUses::RESOURCE) {
-        stages |= shader_stages;
+        // Only textures a vertex shader samples hold back the vertex work of later passes.
+        stages |= if usage.contains(wgt::TextureUses::VERTEX_SAMPLED) {
+            shader_stages
+        } else {
+            shader_stages & !vk::PipelineStageFlags::VERTEX_SHADER
+        };
         access |= vk::AccessFlags::SHADER_READ;
     }
     if usage.contains(wgt::TextureUses::COLOR_TARGET) {
@@ -1270,7 +1276,7 @@ mod tests {
 
     #[test]
     fn texture_shader_stages_follow_queue_flags() {
-        let usage = wgt::TextureUses::RESOURCE;
+        let usage = wgt::TextureUses::RESOURCE | wgt::TextureUses::VERTEX_SAMPLED;
 
         let (stages, access) = map_texture_usage_to_barrier(
             usage,
@@ -1306,6 +1312,28 @@ mod tests {
                 | vk::PipelineStageFlags::COMPUTE_SHADER
         );
         assert_eq!(access, vk::AccessFlags::SHADER_READ);
+    }
+
+    #[test]
+    fn sampled_texture_skips_vertex_stage_unless_vertex_sampled() {
+        let queue = vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE;
+        let (stages, _) = map_texture_usage_to_barrier(
+            wgt::TextureUses::RESOURCE,
+            queue,
+            false,
+            wgt::Features::empty(),
+        );
+        assert_eq!(
+            stages,
+            vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::COMPUTE_SHADER
+        );
+        assert_eq!(
+            derive_image_layout(
+                wgt::TextureUses::RESOURCE | wgt::TextureUses::VERTEX_SAMPLED,
+                wgt::TextureFormat::Rgba8Unorm
+            ),
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
+        );
     }
 
     #[test]

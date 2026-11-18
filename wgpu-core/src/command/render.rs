@@ -779,6 +779,13 @@ impl<'scope, 'snatch_guard, 'cmd_enc> State<'scope, 'snatch_guard, 'cmd_enc> {
     /// `flush_bindings` differs between the two types of passes.
     fn flush_bindings(&mut self) -> Result<(), RenderPassErrorInner> {
         flush_bindings_helper(&mut self.pass)?;
+        if let Some(pipeline) = self.pipeline.as_ref() {
+            unsafe {
+                self.pass
+                    .binder
+                    .flag_vertex_textures(pipeline, &mut self.pass.scope.textures)?
+            };
+        }
         Ok(())
     }
 

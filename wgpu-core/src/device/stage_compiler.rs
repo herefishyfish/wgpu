@@ -5,6 +5,7 @@ use alloc::{
     boxed::Box,
     string::{String, ToString as _},
     sync::Arc,
+    vec::Vec,
 };
 use core::mem::ManuallyDrop;
 
@@ -16,6 +17,11 @@ use crate::{
     resource::ParentDevice as _,
     validation,
 };
+
+/// Stages whose texture reads hold back the vertex work of a render pass.
+pub(crate) const VERTEX_STAGES: wgt::ShaderStages = wgt::ShaderStages::VERTEX
+    .union(wgt::ShaderStages::TASK)
+    .union(wgt::ShaderStages::MESH);
 
 /// State for validating and compiling a pipeline's programmable stages.
 ///
@@ -53,6 +59,8 @@ pub(super) struct StageCompiler<'d> {
 
     /// Stages checked against their Naga module's interface.
     pub validated: wgt::ShaderStages,
+    /// Textures the vertex, task and mesh stages checked so far sample.
+    pub vertex_textures: Vec<naga::ResourceBinding>,
 }
 
 /// A validated pipeline stage, ready to be passed to `wgpu_hal`.
@@ -117,6 +125,7 @@ impl<'d> StageCompiler<'d> {
             resources: validation::PipelineResources::new(layout),
             io: inputs,
             validated: wgt::ShaderStages::empty(),
+            vertex_textures: Vec::new(),
         }
     }
 
@@ -140,6 +149,7 @@ impl<'d> StageCompiler<'d> {
         'd: 'a,
     {
         let stage_bit = stage.to_wgt_bit();
+        let naga_stage = stage.to_naga();
         let stage_err = |error| CreatePipelineError::Stage {
             stage: stage_bit,
             error,
@@ -184,6 +194,10 @@ impl<'d> StageCompiler<'d> {
                     )
                     .map_err(stage_err)?;
                 self.validated |= stage_bit;
+                if stage_bit.intersects(VERTEX_STAGES) {
+                    self.vertex_textures
+                        .extend(interface.sampled_textures(&entry_point, naga_stage));
+                }
 
                 // `process_overrides` returns a fresh copy when the module has overrides
                 // or more than one entry point; otherwise these `into_owned` calls clone
